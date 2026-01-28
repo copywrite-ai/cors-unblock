@@ -7,9 +7,13 @@ export type SerializedRequest = {
 
 export function arrayBufferToBinaryString(arrayBuffer: ArrayBuffer): string {
   const bytes = new Uint8Array(arrayBuffer)
+  const CHUNK_SIZE = 0x8000 // 32KB chunks
   let binary = ''
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i])
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    binary += String.fromCharCode.apply(
+      null,
+      bytes.subarray(i, i + CHUNK_SIZE) as any,
+    )
   }
   return binary
 }

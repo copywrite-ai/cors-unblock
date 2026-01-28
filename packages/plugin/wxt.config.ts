@@ -12,7 +12,7 @@ export default defineConfig({
       name: 'CORS Unblock',
       description:
         'Web apps cross-origin access with precise domain control and simple permissions.',
-      permissions: ['storage', 'tabs', 'declarativeNetRequest'],
+      permissions: ['storage', 'tabs', 'declarativeNetRequest', 'notifications'],
       host_permissions: ['https://*/*', 'http://*/*'],
       web_accessible_resources: [
         {

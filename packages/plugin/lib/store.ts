@@ -1,16 +1,14 @@
 export interface ConfirmState {
   origin: string
   hosts: string[]
+  tabId?: number
 }
 
 const PopupStoreKey = 'popupParams'
 export const popupStore = {
-  setParams: async (params: { origin: string; hosts: string[] }) => {
+  setParams: async (params: ConfirmState) => {
     await browser.storage.session.set({
-      [PopupStoreKey]: {
-        origin: params.origin,
-        hosts: params.hosts,
-      },
+      [PopupStoreKey]: params,
     })
   },
   getParams: async () => {

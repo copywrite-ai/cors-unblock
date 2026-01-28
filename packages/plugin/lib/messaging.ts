@@ -9,9 +9,9 @@ export interface ContentScript2BackgroundMessage {
     hosts?: string[]
   }
   // website request hosts
-  requestHosts(data: { origin: string; hosts: string[] }): void
-  acceptRequestHosts(data: { origin: string; hosts: string[] }): void
-  rejectRequestHosts(data: { origin: string; hosts: string[] }): void
+  requestHosts(data: { origin: string; hosts: string[]; tabId?: number }): void
+  acceptRequestHosts(data: { origin: string; hosts: string[]; tabId?: number }): void
+  rejectRequestHosts(data: { origin: string; hosts: string[]; tabId?: number }): void
   requestAllHosts(data: { origin: string }): void
   delete(data: { origin: string }): void
   getAllRules(): Rule[]

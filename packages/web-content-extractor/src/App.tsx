@@ -1,5 +1,5 @@
 import { createSignal, createEffect } from 'solid-js'
-import { hasInstall, install, getAllowedInfo, requestHosts } from 'cors-unblock'
+import { getAllowedInfo, requestHosts } from 'cors-unblock'
 import { Readability } from '@mozilla/readability'
 import TurndownService from 'turndown'
 import { useMutation } from '@tanstack/solid-query'
@@ -51,11 +51,7 @@ function App() {
         throw new Error('URL is required')
       }
 
-      if (!hasInstall()) {
-        alert('Please install the CORS Unblock extension')
-        install()
-        throw new Error('Please install the CORS Unblock extension')
-      }
+      // Installation check removed as per user request
 
       const allowedInfo = await getAllowedInfo()
       const hostname = new URL(targetUrl).hostname
@@ -112,11 +108,10 @@ function App() {
   return (
     <div class="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
       <div
-        class={`w-full bg-white dark:bg-gray-800 transition-all duration-300 ${
-          hasExtracted()
-            ? 'sticky top-0 z-10 shadow-sm'
-            : 'flex-1 flex items-center'
-        }`}
+        class={`w-full bg-white dark:bg-gray-800 transition-all duration-300 ${hasExtracted()
+          ? 'sticky top-0 z-10 shadow-sm'
+          : 'flex-1 flex items-center'
+          }`}
       >
         {!hasExtracted() ? (
           <div class="w-full -mt-24 sm:-mt-48">

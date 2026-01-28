@@ -181,14 +181,39 @@ export default defineBackground(() => {
     setIcon(ev.data.origin)
   })
   messaging.onMessage('requestHosts', async (ev) => {
-    await popupStore.setParams(ev.data)
-    await browser.action.openPopup()
+    await popupStore.setParams({
+      ...ev.data,
+      tabId: ev.sender.tab?.id,
+    })
+    try {
+      await browser.action.openPopup()
+    } catch (err) {
+      console.warn('[background] Failed to open popup automatically:', err)
+      // Fallback: Notify user to click the extension icon
+      browser.notifications.create('request-hosts', {
+        type: 'basic',
+        iconUrl: '/icon/enabled.png',
+        title: 'CORS Unblock Permission Required',
+        message: `Please click the extension icon to allow requests to: ${ev.data.hosts.join(
+          ', ',
+        )}`,
+        priority: 2,
+      })
+    }
   })
   messaging.onMessage('acceptRequestHosts', async (ev) => {
-    log('acceptRequestHosts')
+    console.log('[background] Received acceptRequestHosts for:', ev.data.origin)
+    let tabId = ev.data.tabId
+    if (!tabId) {
+      const params = await popupStore.getParams()
+      tabId = params?.tabId
+    }
+    console.log('[background] acceptRequestHosts, target tabId:', tabId)
+
     const rule = await findRule(ev.data.origin)
     try {
       if (rule) {
+        console.log('[background] Updating existing rule for:', ev.data.origin)
         rule.condition.requestDomains = uniq([
           ...(rule.meta.hosts ?? []),
           ...ev.data.hosts,
@@ -203,6 +228,7 @@ export default defineBackground(() => {
           updatedAt: new Date().toISOString(),
         })
       } else {
+        console.log('[background] Creating new rule for:', ev.data.origin)
         await browser.declarativeNetRequest.updateSessionRules({
           addRules: [
             createRule(await getRuleId(), ev.data.origin, ev.data.hosts),
@@ -218,37 +244,92 @@ export default defineBackground(() => {
         })
       }
     } catch (err) {
-      console.error('acceptRequestHosts', err)
+      console.error('[background] acceptRequestHosts DB/DNR error:', err)
       throw err
     }
-    log('acceptRequestHosts success')
-    const [tab] = await browser.tabs.query({
-      active: true,
-      currentWindow: true,
-    })
-    log('acceptRequestHosts send accept')
-    await messaging.sendMessage('accept', undefined, { tabId: tab.id! })
-    log('acceptRequestHosts send accept success')
+
+    console.log('[background] Sending "accept" message to tabId:', tabId)
+    try {
+      if (tabId) {
+        await messaging.sendMessage('accept', undefined, { tabId })
+        console.log('[background] "accept" message sent successfully to tabId:', tabId)
+      } else {
+        console.warn('[background] No tabId found in store, falling back to active tab query')
+        const [tab] = await browser.tabs.query({
+          active: true,
+          currentWindow: true,
+        })
+        if (tab?.id) {
+          await messaging.sendMessage('accept', undefined, { tabId: tab.id })
+          console.log('[background] "accept" message sent successfully to active tab:', tab.id)
+        } else {
+          console.error('[background] Could not find any tab to send "accept" to')
+        }
+      }
+    } catch (err) {
+      console.error('[background] Failed to send "accept" message to tab:', err)
+    }
+
+    await popupStore.removeParams()
     setIcon(ev.data.origin)
   })
   messaging.onMessage('rejectRequestHosts', async (ev) => {
+    console.log('[background] Received rejectRequestHosts for:', ev.data.origin)
+    let tabId = ev.data.tabId
+    if (!tabId) {
+      const params = await popupStore.getParams()
+      tabId = params?.tabId
+    }
+    console.log('[background] rejectRequestHosts, target tabId:', tabId)
     setIcon(ev.data.origin)
-    const [tab] = await browser.tabs.query({
-      active: true,
-      currentWindow: true,
-    })
-    await messaging.sendMessage('reject', undefined, { tabId: tab.id! })
+    try {
+      if (tabId) {
+        await messaging.sendMessage('reject', undefined, { tabId })
+        console.log('[background] "reject" message sent successfully to tabId:', tabId)
+      } else {
+        console.warn('[background] No tabId found in store for reject, falling back to active tab query')
+        const [tab] = await browser.tabs.query({
+          active: true,
+          currentWindow: true,
+        })
+        if (tab?.id) {
+          await messaging.sendMessage('reject', undefined, { tabId: tab.id })
+          console.log('[background] "reject" message sent successfully to active tab:', tab.id)
+        }
+      }
+    } catch (err) {
+      console.error('[background] Failed to send "reject" message to tab:', err)
+    }
+    await popupStore.removeParams()
   })
   // TODO https://stackoverflow.com/a/15801294/8409380
   // https://issues.chromium.org/issues/41069221
   browser.runtime.onConnect.addListener((port) => {
     port.onDisconnect.addListener(async () => {
       console.log('[background] popup disconnected')
-      const [tab] = await browser.tabs.query({
-        active: true,
-        currentWindow: true,
-      })
-      await messaging.sendMessage('reject', undefined, { tabId: tab.id! })
+      const params = await popupStore.getParams()
+      const tabId = params?.tabId
+      console.log('[background] popup disconnected, target tabId from store:', tabId)
+      try {
+        if (tabId) {
+          await messaging.sendMessage('reject', undefined, { tabId })
+          console.log('[background] "reject" message sent successfully to tabId:', tabId)
+        } else {
+          console.warn('[background] No tabId found in store on disconnect, falling back to active tab query')
+          const [tab] = await browser.tabs.query({
+            active: true,
+            currentWindow: true,
+          })
+          if (tab?.id) {
+            await messaging.sendMessage('reject', undefined, { tabId: tab.id })
+            console.log('[background] "reject" message sent successfully to active tab:', tab.id)
+          }
+        }
+      } catch (err) {
+        console.error('[background] Failed to send "reject" message on disconnect:', err)
+      }
+      await popupStore.removeParams()
+      console.log('[background] Popup parameters removed after disconnect.')
     })
   })
   messaging.onMessage('delete', async (ev) => {
@@ -259,22 +340,39 @@ export default defineBackground(() => {
     return await dbApi.meta.getAll()
   })
   messaging.onMessage('request', async (ev) => {
-    const rule = await findRule(ev.data.origin)
+    const origin = ev.data.origin
+    const url = ev.data.url
+    const rule = await findRule(origin)
+    const host = new URL(url).hostname
+
+    console.log(`[background] Incoming request from ${origin} to ${host} (URL: ${url})`)
+    console.log(`[background] Rule status for ${host}:`, rule ? `Found (ID: ${rule.id})` : 'Not Found')
+
     if (
       !rule ||
-      (rule.meta.from === 'website' &&
-        !rule.meta.hosts?.includes(new URL(ev.data.url).hostname))
+      (rule.meta.from === 'website' && !rule.meta.hosts?.includes(host))
     ) {
-      throw new Error('CORS unblocked')
+      console.warn(`[background] Denying request to ${host}: NEED_PERMISSION`)
+      throw new Error('NEED_PERMISSION')
     }
-    const req = await deserializeRequest(ev.data)
-    // Strip forbidden/dangerous headers that might cause server to reject
-    req.headers.delete('Origin')
-    req.headers.delete('Referer')
-    req.headers.delete('Host')
-    req.headers.delete('Content-Length')
-    const resp = await fetch(req, { redirect: 'follow' })
-    return await serializeResponse(resp)
+
+    try {
+      const req = await deserializeRequest(ev.data)
+      // Strip forbidden/dangerous headers that might cause server to reject
+      req.headers.delete('Origin')
+      req.headers.delete('Referer')
+
+      console.log(`[background] Fetching ${url}...`)
+      const resp = await fetch(req, { redirect: 'follow' })
+      console.log(`[background] Fetch complete for ${url}, status: ${resp.status}`)
+
+      const serialized = await serializeResponse(resp)
+      console.log(`[background] Response serialized for ${url}, sending back to content script`)
+      return serialized
+    } catch (err: any) {
+      console.error(`[background] Fetch error for ${url}:`, err)
+      throw err
+    }
   })
 
   async function setIcon(url?: string) {

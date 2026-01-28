@@ -14,30 +14,39 @@ export function Confirm() {
       router.push('/')
     }
     setRequestHosts(requestHosts)
-    await popupStore.removeParams()
   })
 
   const acceptMutation = useMutation({
     mutationFn: async () => {
-      console.log('[popup] acceptRequestHosts')
-      await messaging.sendMessage('acceptRequestHosts', {
-        origin: requestHosts()!.origin,
-        hosts: requestHosts()!.hosts,
-      })
-      console.log('[popup] acceptRequestHosts success')
-      // router.push('/')
-      window.close()
+      console.log('[popup] acceptMutation starting', requestHosts())
+      try {
+        await messaging.sendMessage('acceptRequestHosts', {
+          origin: requestHosts()!.origin,
+          hosts: requestHosts()!.hosts,
+          tabId: requestHosts()!.tabId,
+        })
+        console.log('[popup] acceptRequestHosts message sent successfully')
+        window.close()
+      } catch (err) {
+        console.error('[popup] acceptRequestHosts failed:', err)
+      }
     },
   })
 
   const rejectMutation = useMutation({
     mutationFn: async () => {
-      await messaging.sendMessage('rejectRequestHosts', {
-        origin: requestHosts()!.origin,
-        hosts: requestHosts()!.hosts,
-      })
-      // router.push('/')
-      window.close()
+      console.log('[popup] rejectMutation starting', requestHosts())
+      try {
+        await messaging.sendMessage('rejectRequestHosts', {
+          origin: requestHosts()!.origin,
+          hosts: requestHosts()!.hosts,
+          tabId: requestHosts()!.tabId,
+        })
+        console.log('[popup] rejectRequestHosts message sent successfully')
+        window.close()
+      } catch (err) {
+        console.error('[popup] rejectRequestHosts failed:', err)
+      }
     },
   })
 

@@ -13,6 +13,6 @@ export function hasInstall() {
 }
 
 export function install() {
-  location.href =
-    'https://chromewebstore.google.com/detail/odkadbffomicljkjfepnggiibcjmkogc'
+  // Redirection removed as per user request
+  console.log('Install requested but redirection disabled.')
 }
