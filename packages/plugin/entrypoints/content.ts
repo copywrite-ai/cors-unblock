@@ -1,3 +1,4 @@
+import { binaryStringToArrayBuffer, serializeRequest } from '@/lib/serialize'
 import { messaging } from '@/lib/messaging'
 import { internalMessaging } from 'cors-unblock/internal'
 import { isMobile } from 'is-mobile'
@@ -65,5 +66,65 @@ export default defineContentScript({
       )
       await injectScript('/inject.js')
     }
+
+    // Support gitbrowser-ai custom message protocol
+    window.addEventListener('message', async (event) => {
+      if (
+        event.data?.type === 'GIT_FETCH' &&
+        event.data?.source === 'cors-unblock-inject'
+      ) {
+        const { id, data } = event.data
+        try {
+          // Properly wrap the request as a Request object so it can be serialized
+          const req = new Request(data.url, {
+            method: data.method,
+            headers: data.headers,
+            body: data.body,
+          })
+          const serializedReq = await serializeRequest(req)
+
+          const result = await messaging.sendMessage('request', {
+            ...serializedReq,
+            origin: location.origin,
+          })
+
+          // Unpack formatted binary data for gitbrowser-ai
+          let responseData = result.body
+          if (result.body?.type === 'array-buffer') {
+            responseData = new Uint8Array(
+              binaryStringToArrayBuffer(result.body.value),
+            )
+          } else if (result.body?.type === 'json') {
+            responseData = result.body.value
+          } else if (result.body?.type === 'text') {
+            responseData = result.body.value
+          }
+
+          window.postMessage(
+            {
+              source: 'cors-unblock-content',
+              id,
+              result: {
+                url: result.url || data.url,
+                headers: result.headers,
+                status: result.status,
+                statusText: result.statusText,
+                data: responseData,
+              },
+            },
+            '*',
+          )
+        } catch (error: any) {
+          window.postMessage(
+            {
+              source: 'cors-unblock-content',
+              id,
+              error: error.message,
+            },
+            '*',
+          )
+        }
+      }
+    })
   },
 })

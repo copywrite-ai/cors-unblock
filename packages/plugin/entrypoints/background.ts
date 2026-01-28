@@ -59,7 +59,7 @@ function createRule(
           header: 'Access-Control-Allow-Methods',
           operation:
             'set' satisfies EnumValues<HeaderOperation> as HeaderOperation,
-          value: 'PUT, GET, HEAD, POST, DELETE, OPTIONS',
+          value: 'PUT, GET, HEAD, POST, DELETE, OPTIONS, PATCH',
         },
         {
           header: 'Access-Control-Allow-Headers',
@@ -72,6 +72,34 @@ function createRule(
           value: 'true',
           operation:
             'set' satisfies EnumValues<HeaderOperation> as HeaderOperation,
+        },
+        {
+          header: 'Vary',
+          value: 'Origin',
+          operation:
+            'set' satisfies EnumValues<HeaderOperation> as HeaderOperation,
+        },
+      ],
+      requestHeaders: [
+        {
+          header: 'Origin',
+          operation:
+            'remove' satisfies EnumValues<HeaderOperation> as HeaderOperation,
+        },
+        {
+          header: 'Referer',
+          operation:
+            'remove' satisfies EnumValues<HeaderOperation> as HeaderOperation,
+        },
+        {
+          header: 'Host',
+          operation:
+            'remove' satisfies EnumValues<HeaderOperation> as HeaderOperation,
+        },
+        {
+          header: 'Content-Length',
+          operation:
+            'remove' satisfies EnumValues<HeaderOperation> as HeaderOperation,
         },
       ],
     },
@@ -240,7 +268,12 @@ export default defineBackground(() => {
       throw new Error('CORS unblocked')
     }
     const req = await deserializeRequest(ev.data)
-    const resp = await fetch(req)
+    // Strip forbidden/dangerous headers that might cause server to reject
+    req.headers.delete('Origin')
+    req.headers.delete('Referer')
+    req.headers.delete('Host')
+    req.headers.delete('Content-Length')
+    const resp = await fetch(req, { redirect: 'follow' })
     return await serializeResponse(resp)
   })
 

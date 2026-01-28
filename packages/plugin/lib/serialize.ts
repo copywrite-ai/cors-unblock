@@ -5,25 +5,22 @@ export type SerializedRequest = {
   body: any
 }
 
-export function strToArrayBuffer(str: string): ArrayBuffer {
-  try {
-    const encoder = new TextEncoder()
-    const uint8Array = encoder.encode(str)
-    return uint8Array.buffer as ArrayBuffer
-  } catch (error) {
-    console.error('Error converting JSON to ArrayBuffer:', error)
-    throw error
+export function arrayBufferToBinaryString(arrayBuffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(arrayBuffer)
+  let binary = ''
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i])
   }
+  return binary
 }
 
-export function arrayBufferToStr(arrayBuffer: ArrayBuffer): string {
-  try {
-    const decoder = new TextDecoder('utf-8')
-    return decoder.decode(arrayBuffer)
-  } catch (error) {
-    console.error('Error converting ArrayBuffer to JSON:', error)
-    throw error
+export function binaryStringToArrayBuffer(binary: string): ArrayBuffer {
+  const buf = new ArrayBuffer(binary.length)
+  const bufView = new Uint8Array(buf)
+  for (let i = 0; i < binary.length; i++) {
+    bufView[i] = binary.charCodeAt(i)
   }
+  return buf
 }
 
 function readableStream() {
@@ -42,17 +39,14 @@ function readableStream() {
       }
     },
     deserialize: async (value: any) => {
-      if (value.type === 'readable-stream') {
-        return new ReadableStream({
-          start: (controller) => {
-            for (const chunk of value.value) {
-              controller.enqueue(chunk)
-            }
-            controller.close()
-          },
-        })
-      }
-      return value
+      return new ReadableStream({
+        start: (controller) => {
+          for (const chunk of value) {
+            controller.enqueue(chunk)
+          }
+          controller.close()
+        },
+      })
     },
   }
 }
@@ -63,17 +57,14 @@ function arrayBuffer() {
       try {
         return {
           type: 'array-buffer',
-          value: arrayBufferToStr(await req.clone().arrayBuffer()),
+          value: arrayBufferToBinaryString(await req.clone().arrayBuffer()),
         }
       } catch {
         return req.body
       }
     },
     deserialize: async (value: any) => {
-      if (value.type === 'array-buffer') {
-        return strToArrayBuffer(value.value)
-      }
-      return value
+      return binaryStringToArrayBuffer(value)
     },
   }
 }
@@ -170,7 +161,9 @@ export async function deserializeRequest(
 }
 
 export type SerializedResponse = {
+  url: string
   status: number
+  statusText: string
   headers: Record<string, string>
   body: any
 }
@@ -179,7 +172,9 @@ export async function serializeResponse(
   res: Response,
 ): Promise<SerializedResponse> {
   return jsonClone({
+    url: res.url,
     status: res.status,
+    statusText: res.statusText,
     headers: Object.fromEntries(res.headers.entries()),
     body: await serializeBody(res),
   })
@@ -188,9 +183,10 @@ export async function serializeResponse(
 export async function deserializeResponse(
   str: SerializedResponse,
 ): Promise<Response> {
-  const { status, headers, body } = str
+  const { status, statusText, headers, body } = str
   return new Response(await deserializeBody(body), {
     status,
+    statusText,
     headers: new Headers(headers),
   })
 }

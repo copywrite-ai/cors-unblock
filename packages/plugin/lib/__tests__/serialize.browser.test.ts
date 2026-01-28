@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  arrayBufferToStr,
+  arrayBufferToBinaryString,
   deserializeRequest,
-  strToArrayBuffer,
+  binaryStringToArrayBuffer,
   serializeRequest,
   serializeResponse,
   deserializeResponse,
@@ -61,12 +61,12 @@ describe('request', () => {
   it('array buffer request', async () => {
     const request = new Request('https://example.com', {
       method: 'POST',
-      body: strToArrayBuffer(JSON.stringify({ name: 'John' })),
+      body: binaryStringToArrayBuffer(JSON.stringify({ name: 'John' })),
     })
     const serialized = await serializeRequest(request.clone())
     const deserialized = await deserializeRequest(serialized)
-    expect(arrayBufferToStr(await deserialized.arrayBuffer())).toEqual(
-      arrayBufferToStr(await request.arrayBuffer()),
+    expect(arrayBufferToBinaryString(await deserialized.arrayBuffer())).toEqual(
+      arrayBufferToBinaryString(await request.arrayBuffer()),
     )
   })
   it('stream request', async () => {
@@ -86,7 +86,7 @@ describe('request', () => {
     })
     const serialized = await serializeRequest(request)
     const deserialized = await deserializeRequest(serialized)
-    expect(arrayBufferToStr(await deserialized.arrayBuffer())).toEqual(
+    expect(arrayBufferToBinaryString(await deserialized.arrayBuffer())).toEqual(
       'Hello, world!',
     )
   })
@@ -125,7 +125,7 @@ describe('response', () => {
   })
   it('array buffer response', async () => {
     const response = new Response(
-      strToArrayBuffer(JSON.stringify({ name: 'John' })),
+      binaryStringToArrayBuffer(JSON.stringify({ name: 'John' })),
       {
         headers: {
           'Content-Type': 'application/octet-stream',
@@ -134,8 +134,8 @@ describe('response', () => {
     )
     const serialized = await serializeResponse(response)
     const deserialized = await deserializeResponse(serialized)
-    expect(arrayBufferToStr(await deserialized.arrayBuffer()))
-      .eq(arrayBufferToStr(await response.arrayBuffer()))
+    expect(arrayBufferToBinaryString(await deserialized.arrayBuffer()))
+      .eq(arrayBufferToBinaryString(await response.arrayBuffer()))
       .eq(JSON.stringify({ name: 'John' }))
   })
   it('stream response', async () => {
