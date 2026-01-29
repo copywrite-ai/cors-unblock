@@ -1,4 +1,4 @@
-import { binaryStringToArrayBuffer, serializeRequest } from '@/lib/serialize'
+import { binaryStringToArrayBuffer, deserializeBody, serializeRequest } from '@/lib/serialize'
 import { messaging } from '@/lib/messaging'
 import { internalMessaging } from 'cors-unblock/internal'
 import { isMobile } from 'is-mobile'
@@ -161,19 +161,13 @@ export default defineContentScript({
             }
           }
 
-          // Unpack formatted binary data for gitbrowser-ai
-          let responseData = result.body
-          if (result.body?.type === 'array-buffer') {
-            const buffer = binaryStringToArrayBuffer(result.body.value);
-            console.log('[content] Unpacked array-buffer of length:', buffer.byteLength)
-            responseData = new Uint8Array(buffer)
-          } else if (result.body?.type === 'json') {
-            responseData = result.body.value
-          } else if (result.body?.type === 'text') {
-            responseData = result.body.value
+          // Unpack formatted binary data for gitbrowser-ai using robust deserializer
+          let responseData: any = await deserializeBody(result.body);
+          if (responseData instanceof ArrayBuffer) {
+            responseData = new Uint8Array(responseData);
           }
 
-          console.log('[content] Sending result back to page for', data.url, 'data size:', responseData?.length || 'unknown')
+          console.log('[content] Sending result back to page for', data.url, 'data size:', responseData?.length || responseData?.byteLength || '0')
           window.postMessage(
             {
               source: 'cors-unblock-content',

@@ -61,14 +61,16 @@ function arrayBuffer() {
       try {
         return {
           type: 'array-buffer',
-          value: arrayBufferToBinaryString(await req.clone().arrayBuffer()),
+          value: new Uint8Array(await req.clone().arrayBuffer()),
         }
       } catch {
         return req.body
       }
     },
     deserialize: async (value: any) => {
-      return binaryStringToArrayBuffer(value)
+      if (value instanceof Uint8Array) return value.buffer;
+      if (typeof value === 'string') return binaryStringToArrayBuffer(value);
+      return value;
     },
   }
 }
@@ -107,23 +109,19 @@ async function serializeBody(req: Request | Response) {
   throw new Error('Serialize unsupported body type')
 }
 
-function jsonClone(obj: any) {
-  return JSON.parse(JSON.stringify(obj))
-}
-
 export async function serializeRequest(
   req: Request,
 ): Promise<SerializedRequest> {
-  return jsonClone({
+  return {
     url: req.url,
     method: req.method,
     headers: Object.fromEntries(req.headers.entries()),
     body: await serializeBody(req),
-  })
+  }
 }
 
-function deserializeBody(body: any) {
-  if (body === null) {
+export function deserializeBody(body: any) {
+  if (body === null || body === undefined) {
     return null
   }
   if (body.type === 'json') {
@@ -143,7 +141,19 @@ function deserializeBody(body: any) {
     return readableStream().deserialize(body.value)
   }
   if (body.type === 'array-buffer') {
-    return arrayBuffer().deserialize(body.value)
+    const value = body.value;
+    if (value instanceof Uint8Array) return value.buffer;
+    if (typeof value === 'string') return binaryStringToArrayBuffer(value);
+    // Handle serialized object {0:..., 1:..., length:...}
+    if (value && typeof value === 'object' && ('0' in value || 'length' in value)) {
+      const length = value.length || Object.keys(value).length;
+      const arr = new Uint8Array(length);
+      for (let i = 0; i < length; i++) {
+        arr[i] = value[i];
+      }
+      return arr.buffer;
+    }
+    return value;
   }
   console.error('Deserialize unsupported body type', body)
   throw new Error('Deserialize unsupported body type')
@@ -175,13 +185,13 @@ export type SerializedResponse = {
 export async function serializeResponse(
   res: Response,
 ): Promise<SerializedResponse> {
-  return jsonClone({
+  return {
     url: res.url,
     status: res.status,
     statusText: res.statusText,
     headers: Object.fromEntries(res.headers.entries()),
     body: await serializeBody(res),
-  })
+  }
 }
 
 export async function deserializeResponse(

@@ -2,7 +2,7 @@ import { dbApi } from '@/lib/db'
 import { messaging } from '@/lib/messaging'
 import { findRule } from '@/lib/rules'
 import { deleteByOrigin } from '@/lib/rules'
-import { deserializeRequest, serializeResponse } from '@/lib/serialize'
+import { deserializeRequest, serializeResponse, arrayBufferToBinaryString } from '@/lib/serialize'
 import { popupStore } from '@/lib/store'
 import { omit, uniq } from 'es-toolkit'
 import { ulid } from 'ulidx'
@@ -384,19 +384,38 @@ export default defineBackground(() => {
       console.log(`[background] Fetch complete for ${url}, status: ${resp.status} ${resp.statusText}`)
 
       const serialized = await serializeResponse(resp)
-      console.log(`[background] Response serialized for ${url}, body type: ${serialized.body?.type}, sending back`)
+      console.log(`[background] Response serialized for ${url}, body type: ${serialized.body?.type}`)
 
-      // Check for 64MB limit (approximate via JSON string length)
-      // runtime.sendMessage has a limit. 64MB is a lot for JSON.
-      const jsonStr = JSON.stringify(serialized)
-      if (jsonStr.length > 50 * 1024 * 1024) { // 50MB threshold
-        console.log(`[background] Response too large (${jsonStr.length} bytes), chunking...`)
+      // Calculate approximate size without expensive JSON.stringify
+      let bodySize = 0
+      if (serialized.body?.value instanceof Uint8Array) {
+        bodySize = serialized.body.value.byteLength
+      } else if (typeof serialized.body?.value === 'string') {
+        bodySize = serialized.body.value.length
+      }
+
+      const THRESHOLD = 30 * 1024 * 1024 // 30MB
+      if (bodySize > THRESHOLD) {
+        console.log(`[background] Response body too large (${bodySize} bytes), chunking...`)
+
+        // If the body is a Uint8Array, convert it to a binary string for efficient JSON serialization
+        // Otherwise JSON.stringify converts it to {"0":..., "1":...} which is 10x larger.
+        if (serialized.body?.value instanceof Uint8Array) {
+          serialized.body.value = arrayBufferToBinaryString(serialized.body.value.buffer)
+        }
+
         const id = ulid()
-        const CHUNK_SIZE = 10 * 1024 * 1024 // 10MB chunks
+        const CHUNK_SIZE = 8 * 1024 * 1024 // 8MB chunks
         const chunks: any[] = []
+
+        // Serialize the whole thing to JSON precisely ONE time
+        const jsonStr = JSON.stringify(serialized)
+        console.log(`[background] Total chunked JSON size: ${jsonStr.length} bytes`)
+
         for (let i = 0; i < jsonStr.length; i += CHUNK_SIZE) {
           chunks.push(jsonStr.substring(i, i + CHUNK_SIZE))
         }
+
         responseChunks.set(id, chunks)
         return { type: 'multi-part' as const, id, chunkCount: chunks.length }
       }
