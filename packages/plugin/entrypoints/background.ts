@@ -150,13 +150,13 @@ export default defineBackground(() => {
     if (!rule) {
       return {
         enabled: false,
-        type: 'specific',
+        type: 'specific' as const,
         hosts: [],
       }
     }
     return {
       enabled: true,
-      type: rule.meta.hosts ? 'specific' : 'all',
+      type: (rule.meta.hosts ? 'specific' : 'all') as 'all' | 'specific',
       hosts: rule.meta.hosts,
     }
   })
@@ -339,6 +339,21 @@ export default defineBackground(() => {
   messaging.onMessage('getAllRules', async () => {
     return await dbApi.meta.getAll()
   })
+
+  // Large response chunk storage
+  const responseChunks = new Map<string, any[]>()
+
+  messaging.onMessage('getResponseChunk', (ev) => {
+    const { id, index } = ev.data
+    const chunks = responseChunks.get(id)
+    if (!chunks) throw new Error('Chunks not found')
+    const chunk = chunks[index]
+    if (index === chunks.length - 1) {
+      // Clean up after last chunk
+      setTimeout(() => responseChunks.delete(id), 1000)
+    }
+    return chunk
+  })
   messaging.onMessage('request', async (ev) => {
     const origin = ev.data.origin
     const url = ev.data.url
@@ -359,15 +374,33 @@ export default defineBackground(() => {
     try {
       const req = await deserializeRequest(ev.data)
       // Strip forbidden/dangerous headers that might cause server to reject
-      req.headers.delete('Origin')
-      req.headers.delete('Referer')
+      const forbiddenHeaders = ['Origin', 'Referer', 'Host', 'Content-Length']
+      forbiddenHeaders.forEach(h => req.headers.delete(h))
 
-      console.log(`[background] Fetching ${url}...`)
+      console.log(`[background] Fetching ${url}... with method ${req.method}`)
+      console.log(`[background] Custom headers:`, Object.fromEntries(req.headers.entries()))
+
       const resp = await fetch(req, { redirect: 'follow' })
-      console.log(`[background] Fetch complete for ${url}, status: ${resp.status}`)
+      console.log(`[background] Fetch complete for ${url}, status: ${resp.status} ${resp.statusText}`)
 
       const serialized = await serializeResponse(resp)
-      console.log(`[background] Response serialized for ${url}, sending back to content script`)
+      console.log(`[background] Response serialized for ${url}, body type: ${serialized.body?.type}, sending back`)
+
+      // Check for 64MB limit (approximate via JSON string length)
+      // runtime.sendMessage has a limit. 64MB is a lot for JSON.
+      const jsonStr = JSON.stringify(serialized)
+      if (jsonStr.length > 50 * 1024 * 1024) { // 50MB threshold
+        console.log(`[background] Response too large (${jsonStr.length} bytes), chunking...`)
+        const id = ulid()
+        const CHUNK_SIZE = 10 * 1024 * 1024 // 10MB chunks
+        const chunks: any[] = []
+        for (let i = 0; i < jsonStr.length; i += CHUNK_SIZE) {
+          chunks.push(jsonStr.substring(i, i + CHUNK_SIZE))
+        }
+        responseChunks.set(id, chunks)
+        return { type: 'multi-part' as const, id, chunkCount: chunks.length }
+      }
+
       return serialized
     } catch (err: any) {
       console.error(`[background] Fetch error for ${url}:`, err)

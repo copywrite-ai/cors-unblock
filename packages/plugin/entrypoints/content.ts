@@ -129,7 +129,21 @@ export default defineContentScript({
           let result: any
           try {
             result = await sendRequest()
-            console.log('[content] Background request succeeded for', data.url)
+
+            // Handle multi-part responses for large data
+            if (result && result.type === 'multi-part') {
+              console.log('[content] Receiving multi-part response, id:', result.id, 'chunks:', result.chunkCount)
+              let fullJson = ''
+              for (let i = 0; i < result.chunkCount; i++) {
+                console.log('[content] Fetching chunk', i + 1, '/', result.chunkCount)
+                const chunk = await messaging.sendMessage('getResponseChunk', { id: result.id, index: i })
+                fullJson += chunk
+              }
+              result = JSON.parse(fullJson)
+              console.log('[content] Reassembled multi-part response, size:', fullJson.length)
+            }
+
+            console.log('[content] Background request succeeded for', data.url, 'status:', result.status)
           } catch (error: any) {
             if (error.message === 'NEED_PERMISSION') {
               console.log('[content] Permission needed for', data.url, 'triggering UI')
@@ -142,7 +156,7 @@ export default defineContentScript({
                 throw error
               }
             } else {
-              console.error('[content] Background request failed for', data.url, error)
+              console.error('[content] Background request failed for', data.url, 'Error:', error.message)
               throw error
             }
           }
@@ -150,16 +164,16 @@ export default defineContentScript({
           // Unpack formatted binary data for gitbrowser-ai
           let responseData = result.body
           if (result.body?.type === 'array-buffer') {
-            responseData = new Uint8Array(
-              binaryStringToArrayBuffer(result.body.value),
-            )
+            const buffer = binaryStringToArrayBuffer(result.body.value);
+            console.log('[content] Unpacked array-buffer of length:', buffer.byteLength)
+            responseData = new Uint8Array(buffer)
           } else if (result.body?.type === 'json') {
             responseData = result.body.value
           } else if (result.body?.type === 'text') {
             responseData = result.body.value
           }
 
-          console.log('[content] Sending result back to page for', data.url)
+          console.log('[content] Sending result back to page for', data.url, 'data size:', responseData?.length || 'unknown')
           window.postMessage(
             {
               source: 'cors-unblock-content',
