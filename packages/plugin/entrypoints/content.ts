@@ -133,14 +133,17 @@ export default defineContentScript({
             // Handle multi-part responses for large data
             if (result && result.type === 'multi-part') {
               console.log('[content] Receiving multi-part response, id:', result.id, 'chunks:', result.chunkCount)
-              let fullJson = ''
+              const meta = result.meta;
+              let fullBody = ''
               for (let i = 0; i < result.chunkCount; i++) {
                 console.log('[content] Fetching chunk', i + 1, '/', result.chunkCount)
                 const chunk = await messaging.sendMessage('getResponseChunk', { id: result.id, index: i })
-                fullJson += chunk
+                fullBody += chunk
               }
-              result = JSON.parse(fullJson)
-              console.log('[content] Reassembled multi-part response, size:', fullJson.length)
+
+              meta.body.value = fullBody;
+              result = meta;
+              console.log('[content] Reassembled multi-part body, size:', fullBody.length)
             }
 
             console.log('[content] Background request succeeded for', data.url, 'status:', result.status)

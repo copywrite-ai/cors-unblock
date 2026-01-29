@@ -5,8 +5,8 @@ export type SerializedRequest = {
   body: any
 }
 
-export function arrayBufferToBinaryString(arrayBuffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(arrayBuffer)
+export function arrayBufferToBinaryString(input: ArrayBuffer | Uint8Array): string {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
   const CHUNK_SIZE = 0x8000 // 32KB chunks
   let binary = ''
   for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
@@ -98,9 +98,12 @@ async function serializeBody(req: Request | Response) {
       value: Object.fromEntries(await req.formData()),
     }
   }
-  const b = await arrayBuffer().serialize(req)
-  if (b !== null) {
-    return b
+  const b = await arrayBuffer().serialize(req);
+  if (b !== null && typeof b === 'object' && 'type' in b && b.type === 'array-buffer') {
+    return {
+      type: 'array-buffer',
+      value: arrayBufferToBinaryString((b as any).value as Uint8Array)
+    };
   }
   if (req.body instanceof ReadableStream) {
     return await readableStream().serialize(req.body)

@@ -386,38 +386,42 @@ export default defineBackground(() => {
       const serialized = await serializeResponse(resp)
       console.log(`[background] Response serialized for ${url}, body type: ${serialized.body?.type}`)
 
-      // Calculate approximate size without expensive JSON.stringify
-      let bodySize = 0
-      if (serialized.body?.value instanceof Uint8Array) {
-        bodySize = serialized.body.value.byteLength
-      } else if (typeof serialized.body?.value === 'string') {
-        bodySize = serialized.body.value.length
+      // Flatten stream bodies immediately so we can accurately measure size
+      let finalBody: any = serialized.body?.value;
+      if (serialized.body?.type === 'readable-stream' && Array.isArray(finalBody)) {
+        const totalLength = finalBody.reduce((acc: number, c: any) => acc + (c.length || 0), 0);
+        const combined = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of finalBody) {
+          combined.set(new Uint8Array(chunk), offset);
+          offset += chunk.length;
+        }
+        finalBody = arrayBufferToBinaryString(combined);
+        serialized.body.type = 'array-buffer';
+        serialized.body.value = finalBody;
       }
 
-      const THRESHOLD = 30 * 1024 * 1024 // 30MB
-      if (bodySize > THRESHOLD) {
-        console.log(`[background] Response body too large (${bodySize} bytes), chunking...`)
+      // Final consistency check: all array-buffer values should be binary strings by now
+      // (from serialize.ts or the stream flattening above)
+      const bodyStr = typeof finalBody === 'string' ? finalBody : '';
+      const THRESHOLD = 2 * 1024 * 1024 // 2MB threshold for body chunking
 
-        // If the body is a Uint8Array, convert it to a binary string for efficient JSON serialization
-        // Otherwise JSON.stringify converts it to {"0":..., "1":...} which is 10x larger.
-        if (serialized.body?.value instanceof Uint8Array) {
-          serialized.body.value = arrayBufferToBinaryString(serialized.body.value.buffer)
-        }
+      if (bodyStr.length > THRESHOLD) {
+        console.log(`[background] Body too large (${bodyStr.length} bytes), chunking body...`)
 
         const id = ulid()
-        const CHUNK_SIZE = 8 * 1024 * 1024 // 8MB chunks
-        const chunks: any[] = []
+        const CHUNK_SIZE = 1 * 1024 * 1024 // 1MB string chunks to be absolutely safe
+        const chunks: string[] = []
 
-        // Serialize the whole thing to JSON precisely ONE time
-        const jsonStr = JSON.stringify(serialized)
-        console.log(`[background] Total chunked JSON size: ${jsonStr.length} bytes`)
-
-        for (let i = 0; i < jsonStr.length; i += CHUNK_SIZE) {
-          chunks.push(jsonStr.substring(i, i + CHUNK_SIZE))
+        for (let i = 0; i < bodyStr.length; i += CHUNK_SIZE) {
+          chunks.push(bodyStr.substring(i, i + CHUNK_SIZE))
         }
 
         responseChunks.set(id, chunks)
-        return { type: 'multi-part' as const, id, chunkCount: chunks.length }
+
+        // Remove the large body from the initial response sent to content
+        const meta = { ...serialized, body: { ...serialized.body, value: null } }
+        return { type: 'multi-part' as const, id, chunkCount: chunks.length, meta }
       }
 
       return serialized

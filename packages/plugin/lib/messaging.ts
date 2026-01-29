@@ -20,7 +20,7 @@ export interface ContentScript2BackgroundMessage {
   ping(): string
 
   // safari only
-  request(req: SerializedRequest & { origin: string }): SerializedResponse | { type: 'multi-part'; id: string; chunkCount: number }
+  request(req: SerializedRequest & { origin: string }): SerializedResponse | { type: 'multi-part'; id: string; chunkCount: number; meta: SerializedResponse }
   getResponseChunk(data: { id: string; index: number }): any
 }
 
